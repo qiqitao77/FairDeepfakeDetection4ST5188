@@ -7,20 +7,19 @@ from torchvision import transforms
 class DeepfakeDataset(Dataset):
     """
     """
-    def __init__(self,data_df,transform=None):
+    def __init__(self,data_dict,transform=None):
         super(DeepfakeDataset, self).__init__()
-        self.data_df = data_df
-        self.data_dict = data_df.to_dict(orient='index')
+        self.data_dict = data_dict
         if transform:
             self.transform = transform
         else:
             self.transform = transforms.ToTensor()
 
     def __len__(self):
-        return len(self.data_df)
+        return len(self.data_dict)
 
     def __getitem__(self, idx):
-        # row = self.data_df.loc[idx,:]
+        idx = str(idx)
         row = self.data_dict[idx]
         image_path = row['image_path']
         img = Image.open(row['image_path'])

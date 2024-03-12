@@ -4,6 +4,7 @@ This is to train baseline model, including ResNet, XceptionNet, EfficientNet.
 Author: Tao Qiqi
 Date: 2024-03
 """
+import json
 import os
 import argparse
 import pandas as pd
@@ -63,27 +64,38 @@ Load data
 """
 print('Reading dataset csv files...')
 data_split_root = '../data_split'
-faketrain_df = pd.read_csv(os.path.join(data_split_root,'processed_faketrain.csv'))
-fakeval_df = pd.read_csv(os.path.join(data_split_root,'processed_fakeval.csv'))
-faketest_df = pd.read_csv(os.path.join(data_split_root,'processed_faketest.csv'))
-realtrain_df = pd.read_csv(os.path.join(data_split_root,'processed_realtrain.csv'))
-realval_df = pd.read_csv(os.path.join(data_split_root,'processed_realval.csv'))
-realtest_df = pd.read_csv(os.path.join(data_split_root,'processed_realtest.csv'))
+# faketrain_df = pd.read_csv(os.path.join(data_split_root,'processed_faketrain.csv'))
+# fakeval_df = pd.read_csv(os.path.join(data_split_root,'processed_fakeval.csv'))
+# faketest_df = pd.read_csv(os.path.join(data_split_root,'processed_faketest.csv'))
+# realtrain_df = pd.read_csv(os.path.join(data_split_root,'processed_realtrain.csv'))
+# realval_df = pd.read_csv(os.path.join(data_split_root,'processed_realval.csv'))
+# realtest_df = pd.read_csv(os.path.join(data_split_root,'processed_realtest.csv'))
+#
+# train_df = realtrain_df
+# val_df = realval_df
+# test_df = realtest_df
+#
+# train_df = pd.concat([realtrain_df,faketrain_df]).reset_index(drop=True)
+# val_df = pd.concat([realval_df,fakeval_df]).reset_index(drop=True)
+# test_df = pd.concat([realtest_df,faketest_df]).reset_index(drop=True)
 
-train_df = realtrain_df
-val_df = realval_df
-test_df = realtest_df
+with open(os.path.join(data_split_root,'updated_idx_train.json'), 'r') as json_file:
+    train_dict = json.load(json_file)
+json_file.close()
+with open(os.path.join(data_split_root,'updated_idx_val.json'), 'r') as json_file:
+    val_dict = json.load(json_file)
+json_file.close()
+with open(os.path.join(data_split_root,'updated_idx_test.json'), 'r') as json_file:
+    test_dict = json.load(json_file)
+json_file.close()
 
-train_df = pd.concat([realtrain_df,faketrain_df]).reset_index(drop=True)
-val_df = pd.concat([realval_df,fakeval_df]).reset_index(drop=True)
-test_df = pd.concat([realtest_df,faketest_df]).reset_index(drop=True)
 
 print('Creating and loading datasets...')
-trainset = DeepfakeDataset(train_df, transform)
-valset = DeepfakeDataset(val_df, transform)
-testset = DeepfakeDataset(test_df, transform)
+trainset = DeepfakeDataset(train_dict, transform)
+valset = DeepfakeDataset(val_dict, transform)
+testset = DeepfakeDataset(test_dict, transform)
 
-train_loader = DataLoader(dataset=trainset, shuffle=True, num_workers=8, batch_size=512)
+train_loader = DataLoader(dataset=trainset, shuffle=False, num_workers=8, batch_size=512)
 val_loader = DataLoader(dataset=valset, shuffle=False, num_workers=8, batch_size=512)
 test_loader = DataLoader(dataset=testset, shuffle=False, num_workers=8, batch_size=512)
 
@@ -107,7 +119,7 @@ for epoch in range(epochs):
     pred_labels_list = []
     pred_probs_list = []
     intersec_labels_list = []
-    model training
+    # model training
     for _, data in enumerate(train_loader):
         print(f'Training epoch{epoch+1}/{epochs}, batch{_+1}.')
         imgs = data['img'].to(device)
@@ -136,16 +148,16 @@ for epoch in range(epochs):
 
     #evaluate fairness across gender
     gender_labels_list = [x.split('-')[0] for x in intersec_labels_list]
-    training_acc, training_auc, training_FPR, training_fair_gender_FFPR, training_fair_gender_FOAE, training_fair_gender_FMEO, _ = fairness_metrics(
+    training_acc, training_auc, training_FPR, training_fair_gender_FFPR, training_fair_gender_FOAE, training_fair_gender_FMEO, training_gender_matrix = fairness_metrics(
         np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), gender_labels_list)
 
     #evaluate fairness across race
     race_labels_list = [x.split('-')[1] for x in intersec_labels_list]
-    _, _, _, training_fair_race_FFPR, training_fair_race_FOAE, training_fair_race_FMEO, _ = fairness_metrics(
+    _, _, _, training_fair_race_FFPR, training_fair_race_FOAE, training_fair_race_FMEO, training_race_metrics = fairness_metrics(
         np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), race_labels_list)
 
     #evaluate fairness across intersection group
-    _, _, _, training_fair_intersec_FFPR, training_fair_intersec_FOAE, training_fair_intersec_FMEO, _ = fairness_metrics(
+    _, _, _, training_fair_intersec_FFPR, training_fair_intersec_FOAE, training_fair_intersec_FMEO, training_intersec_metrics = fairness_metrics(
         np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), intersec_labels_list)
 
     with torch.no_grad():
@@ -180,16 +192,16 @@ for epoch in range(epochs):
 
         # evaluate fairness across gender
         gender_labels_list = [x.split('-')[0] for x in intersec_labels_list]
-        val_acc, val_auc, val_FPR, val_fair_gender_FFPR, val_fair_gender_FOAE, val_fair_gender_FMEO, _ = fairness_metrics(
+        val_acc, val_auc, val_FPR, val_fair_gender_FFPR, val_fair_gender_FOAE, val_fair_gender_FMEO, val_gender_metrics = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), gender_labels_list)
 
         # evaluate fairness across race
         race_labels_list = [x.split('-')[1] for x in intersec_labels_list]
-        _, _, _, val_fair_race_FFPR, val_fair_race_FOAE, val_fair_race_FMEO, _ = fairness_metrics(
+        _, _, _, val_fair_race_FFPR, val_fair_race_FOAE, val_fair_race_FMEO, val_race_metrics = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), race_labels_list)
 
         # evaluate fairness across intersection group
-        _, _, _, val_fair_intersec_FFPR, val_fair_intersec_FOAE, val_fair_intersec_FMEO, _ = fairness_metrics(
+        _, _, _, val_fair_intersec_FFPR, val_fair_intersec_FOAE, val_fair_intersec_FMEO, val_intersec_metrics = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), intersec_labels_list)
 
         # evaluation on testing set
@@ -225,9 +237,9 @@ for epoch in range(epochs):
 
         # evaluate fairness across race
         race_labels_list = [x.split('-')[1] for x in intersec_labels_list]
-        _, _, _, testing_fair_race_FFPR, testing_fair_race_FOAE, testing_fair_race_FMEO, _ = fairness_metrics(
+        _, _, _, testing_fair_race_FFPR, testing_fair_race_FOAE, testing_fair_race_FMEO, testing_gender_metrics = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), race_labels_list)
 
         # evaluate fairness across intersection group
-        _, _, _, testing_fair_intersec_FFPR, testing_fair_intersec_FOAE, testing_fair_intersec_FMEO, _ = fairness_metrics(
+        _, _, _, testing_fair_intersec_FFPR, testing_fair_intersec_FOAE, testing_fair_intersec_FMEO, testing_intersec_metrics = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), intersec_labels_list)

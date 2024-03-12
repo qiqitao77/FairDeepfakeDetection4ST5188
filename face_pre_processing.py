@@ -149,7 +149,7 @@ if __name__ == "__main__":
 
         if not dets: # if no face detected, directly resize the original image
             print(input_image)
-            output_img = cv2.resize(img, dsize=(380, 380))
+            output_img = cv2.resize(img, dsize=(380, 380)) # if no face detected, here the GRAY IMAGE WITH ONLY 1 CHANNEL is saved!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! These gray images should be removed from train/val/test data by check_colored_image.py!!
             print(f'No face is detected, directly resize: {input_image}')
             logging.warning(f'No face detected in {input_image}')
             # cv2.imshow(cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB))
