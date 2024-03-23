@@ -257,4 +257,5 @@ class XceptionNet(nn.Module):
     def forward(self, input):
         x = self.features(input)
         out = self.classifier(x)
-        return out, x
+        # return out, x
+        return out

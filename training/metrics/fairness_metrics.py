@@ -88,7 +88,7 @@ if __name__ == "__main__":
     x = labels == preds
 
     demographic_groups = [1,1,2,1,2]
-    f_fpr, f_oae, f_meo, fair_metrics = fairness_metrics(labels,preds,demographic_groups)
+    f_fpr, f_oae, f_meo, fair_metrics = fairness_metrics(labels,preds,preds,demographic_groups)
     print(f'F_FPR: {f_fpr}.')
     print(f'F_OAE: {f_oae}.')
     print(f'F_MEO: {f_meo}.')
