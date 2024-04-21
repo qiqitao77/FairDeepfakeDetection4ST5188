@@ -15,7 +15,7 @@ from sklearn.metrics import roc_auc_score, confusion_matrix
 #         self.con_mat = confusion_matrix(labels, preds)
 #
 #     def auc(self):
-def detection_metrics(labels, pred_labels, pred_probs):
+def detection_metrics(labels, pred_labels, pred_probs, binary=True):
     """
     Calculate detection accuracy, AUC, True Positive Rate, False Positive Rate and confusion matrix.
     :param labels: np.array
@@ -23,24 +23,31 @@ def detection_metrics(labels, pred_labels, pred_probs):
     :param pred_probs: np.array
     :return:
     """
-    con_mat = confusion_matrix(labels, pred_labels)
-    if con_mat.shape[0] != 2:
-        TN = con_mat
-        con_mat = np.zeros((2,2))
-        con_mat[0,0] = TN
-    TN = con_mat[0][0]
-    FN = con_mat[1][0]
-    TP = con_mat[1][1]
-    FP = con_mat[0][1]
-    acc = (TN+TP) / (TN+FN+TP+FP)
-    if len(set(labels)) > 1:
-        auc = roc_auc_score(labels, pred_probs)
-        FPR = FP / (FP + TN)
-        TPR = TP/(TP+FN)
+    if binary:
+        con_mat = confusion_matrix(labels, pred_labels)
+        if con_mat.shape[0] != 2:
+            TN = con_mat
+            con_mat = np.zeros((2,2))
+            con_mat[0,0] = TN
+        TN = con_mat[0][0]
+        FN = con_mat[1][0]
+        TP = con_mat[1][1]
+        FP = con_mat[0][1]
+        acc = (TN+TP) / (TN+FN+TP+FP)
+        if len(set(labels)) > 1:
+            auc = roc_auc_score(labels, pred_probs)
+            FPR = FP / (FP + TN)
+            TPR = TP/(TP+FN)
+        else:
+            auc = 0
+            TPR = 0
+            FPR = 0
     else:
-        auc = 0
-        TPR = 0
-        FPR = 0
+        acc = sum([label == pred for label,pred in zip(labels, pred_labels)]) / len(labels)
+        auc = roc_auc_score(labels, pred_probs, average='macro', multi_class='ovo')
+        TPR = None
+        FPR = None
+        con_mat = None
     return acc, auc, TPR, FPR, con_mat
 
 # fairness metrics: F_FPR, F_OAE, F_MEO

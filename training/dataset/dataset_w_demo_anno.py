@@ -4,10 +4,12 @@ from torch.utils.data import Dataset
 from PIL import Image
 from torchvision import transforms
 
+
 class DeepfakeDataset(Dataset):
     """
     """
-    def __init__(self,data_dict,transform=None):
+
+    def __init__(self, data_dict, transform=None):
         super(DeepfakeDataset, self).__init__()
         self.data_dict = data_dict
         if transform:
@@ -27,9 +29,21 @@ class DeepfakeDataset(Dataset):
         label = row['label']
         intersec_label = row['intersec_label']
         spe_label = row['spe_label']
-        row_dict = {'image_path': image_path,
-                'img':transformed_img,
-                'label': label,
-                'intersec_label': intersec_label,
-                'spe_label': spe_label}
+
+        if 'gender_label' in row.keys() and 'race_label' in row.keys():
+            gender_label = row['gender_label']
+            race_label = row['race_label']
+            row_dict = {'image_path': image_path,
+                        'img': transformed_img,
+                        'label': label,
+                        'intersec_label': intersec_label,
+                        'spe_label': spe_label,
+                        'gender_label': gender_label,
+                        'race_label': race_label}
+        else:
+            row_dict = {'image_path': image_path,
+                        'img': transformed_img,
+                        'label': label,
+                        'intersec_label': intersec_label,
+                        'spe_label': spe_label}
         return row_dict

@@ -35,7 +35,7 @@ class Block(nn.Module):
         else:
             self.skip = None
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
         rep = []
 
         filters = in_filters
@@ -108,7 +108,7 @@ class XceptionNet(nn.Module):
         self.conv1 = nn.Conv2d(inc, 32, 3, 2, 0, bias=False)
 
         self.bn1 = nn.BatchNorm2d(32)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
 
         self.conv2 = nn.Conv2d(32, 64, 3, bias=False)
         self.bn2 = nn.BatchNorm2d(64)
@@ -151,14 +151,17 @@ class XceptionNet(nn.Module):
         self.conv4 = SeparableConv2d(1536, 2048, 3, 1, 1)
         self.bn4 = nn.BatchNorm2d(2048)
         if self.adjust_mode == 'adjust_channel':
-            self.last_linear = nn.Linear(512, self.num_classes)
+            last_linear_channel = 512
         else:
-            self.last_linear = nn.Linear(2048, self.num_classes)
+            last_linear_channel = 2048
+
         if dropout:
             self.last_linear = nn.Sequential(
                 nn.Dropout(p=dropout),
-                nn.Linear(2048, self.num_classes)
+                nn.Linear(last_linear_channel, self.num_classes)
             )
+        else:
+            self.last_linear = nn.Linear(last_linear_channel, self.num_classes)
 
         self.adjust_channel = nn.Sequential(
             nn.Conv2d(2048, 512, 1, 1),

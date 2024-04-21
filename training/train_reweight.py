@@ -21,6 +21,7 @@ from backbones.XceptionNet import XceptionNet
 from backbones.EfficientNet import EfficientNet
 from backbones import models_hongguliu # for XceptionNet
 from metrics.fairness_metrics import fairness_metrics
+from losses.losses import WeightedSampleCrossEntropyLoss
 import logging
 import wandb
 import time
@@ -39,13 +40,16 @@ if __name__ == '__main__':
                  'EfficientNet-B4': EfficientNet('EfficientNet-B4'),
                  'XceptionNet': XceptionNet(xception_config=xception_config),
                  'XceptionNet-hongguliu': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5),
-                 'XceptionNet-hongguliu-ImageNet-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ImageNet')
-                 # 'XceptionNet-hongguliu-ffpp-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ffpp')
+                 'XceptionNet-hongguliu-ImageNet-pretrained': models_hongguliu.model_selection(modelname='xception',
+                                                                                               num_out_classes=2,
+                                                                                               dropout=0.5,
+                                                                                               pretrained='ImageNet')
                  }
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_split_root', type=str, default='../data_split')
     parser.add_argument('--model', type=str, choices=model_zoo.keys())
+    parser.add_argument('--sensitive_attr', type=str, choices=['gender', 'race', 'intersec'])
     parser.add_argument('-bs', '--batch_size', type=int, default=512)
     parser.add_argument('-lr', '--learning_rate', type=float, default=5e-4)
     parser.add_argument('-epochs', '--epochs', type=int, default=100)
@@ -53,7 +57,12 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt_root', default='./ckpt')
     parser.add_argument('--log_root', default='./logs')
     parser.add_argument('--balanced', action='store_true',help='While using balanced mode, only real and FaceSwap data will be included.')
+    ### efficientnet is kill... need to resume
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--resume_ckpt', type=str)
+    parser.add_argument('--weight_mode', default=None, choices=[None, 'subgroup', 'prior_equal_dist'])
     args = parser.parse_args()
+
 
     """
     Initialize logger
@@ -62,7 +71,7 @@ if __name__ == '__main__':
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))
     mode = "real_and_FS" if args.balanced else "all_data"
-    logger_name = timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_' + mode + '.log'
+    logger_name = f'[reweighted-{args.sensitive_attr}]' + timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_' + mode + '.log'
     logging.basicConfig(filename=os.path.join(args.log_root, logger_name), level=logging.INFO, format=LOG_FORMAT)
 
     # os.environ['CUDA_VISIBLE_DEVICE'] = '1,3'
@@ -107,10 +116,10 @@ if __name__ == '__main__':
     logging.info(f'The trainable number of parameters: {trainable_param_num}.')
     print(f'The trainable number of parameters: {trainable_param_num}.')
 
-    if args.model == 'XceptionNet':
-        print(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
-        logging.info(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
-
+    if args.resume:
+        logging.info(f'Resume training from ckpt {args.resume_ckpt}.')
+        state_dict = torch.load(args.resume_ckpt)
+        model.load_state_dict(state_dict)
     """
     Load data
     """
@@ -169,8 +178,13 @@ if __name__ == '__main__':
     Define loss and optimizer
     """
     print('Getting loss and optimizer...')
-    criterion = nn.CrossEntropyLoss()
-    logging.info(f'Using loss function: Cross-Entropy loss.')
+
+    ##### reweighted method: assign weights to samples while calculating loss
+    # criterion = nn.CrossEntropyLoss()
+    criterion = WeightedSampleCrossEntropyLoss(args.sensitive_attr,args.weight_mode)
+
+
+    logging.info(f'Using loss function: Weighted Cross-Entropy loss. Weight model: {args.weight_mode}')
     optimizer = optim.SGD(model.parameters(), lr=lr)
     logging.info(f'Using optimizer: SGD, learning rate {lr}.')
 
@@ -179,7 +193,7 @@ if __name__ == '__main__':
     """
     wandb.init(
         project='ST5188_fair_deepfake',
-        name=backbone + mode + 'lr'+str(lr),
+        name=f'[reweighted-{args.sensitive_attr}]' + backbone + mode + 'lr'+str(lr),
         config={'learning_rate': lr,
                 'epochs': epochs,
                 'model': backbone}
@@ -216,7 +230,14 @@ if __name__ == '__main__':
 
             optimizer.zero_grad()
 
-            loss = criterion(preds, labels)
+            if args.sensitive_attr == 'gender':
+                attributes = [x.split('-')[0] for x in intersec_labels]
+            elif args.sensitive_attr == 'race':
+                attributes = [x.split('-')[1] for x in intersec_labels]
+            else:
+                attributes = intersec_labels
+
+            loss = criterion(preds, labels, attributes)
             loss.backward()
             optimizer.step()
             running_loss += loss.item() * imgs.shape[0]
@@ -278,7 +299,14 @@ if __name__ == '__main__':
                 pred_labels_list.extend(pred_labels.cpu().data.numpy().tolist())
                 pred_probs_list.extend(pred_probs.cpu().data.numpy().tolist())
 
-                loss = criterion(preds, labels)
+                if args.sensitive_attr == 'gender':
+                    attributes = [x.split('-')[0] for x in intersec_labels]
+                elif args.sensitive_attr == 'race':
+                    attributes = [x.split('-')[1] for x in intersec_labels]
+                else:
+                    attributes = intersec_labels
+
+                loss = criterion(preds, labels, attributes)
                 running_loss += loss.item() * imgs.shape[0]
             epoch_val_loss = running_loss / len(valset)
             print(f'[Validation Loss] Epoch {epoch + 1}/{epochs}: {epoch_val_loss:.2f}.')
@@ -336,7 +364,14 @@ if __name__ == '__main__':
                 pred_labels_list.extend(pred_labels.cpu().data.numpy().tolist())
                 pred_probs_list.extend(pred_probs.cpu().data.numpy().tolist())
 
-                loss = criterion(preds, labels)
+                if args.sensitive_attr == 'gender':
+                    attributes = [x.split('-')[0] for x in intersec_labels]
+                elif args.sensitive_attr == 'race':
+                    attributes = [x.split('-')[1] for x in intersec_labels]
+                else:
+                    attributes = intersec_labels
+
+                loss = criterion(preds, labels, attributes)
                 running_loss += loss.item() * imgs.shape[0]
             epoch_test_loss = running_loss / len(testset)
             print(f'[Testing Loss] Epoch {epoch + 1}/{epochs}: {epoch_test_loss:.2f}.')

@@ -19,7 +19,6 @@ from torch.utils.data import DataLoader
 from backbones.ResNet import ResNet
 from backbones.XceptionNet import XceptionNet
 from backbones.EfficientNet import EfficientNet
-from backbones import models_hongguliu # for XceptionNet
 from metrics.fairness_metrics import fairness_metrics
 import logging
 import wandb
@@ -30,30 +29,28 @@ if __name__ == '__main__':
                        'mode': None,
                        'adjust_mode': 'adjust_channel',
                        'inc': 3,
-                       'dropout': True}
+                       'dropout': False}
 
     model_zoo = {'ResNet-18': ResNet('ResNet-18'),
                  'ResNet-34': ResNet('ResNet-34'),
                  'ResNet-50': ResNet('ResNet-50'),
                  'EfficientNet-B3': EfficientNet('EfficientNet-B3'),
                  'EfficientNet-B4': EfficientNet('EfficientNet-B4'),
-                 'XceptionNet': XceptionNet(xception_config=xception_config),
-                 'XceptionNet-hongguliu': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5),
-                 'XceptionNet-hongguliu-ImageNet-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ImageNet')
-                 # 'XceptionNet-hongguliu-ffpp-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ffpp')
-                 }
+                 'XceptionNet': XceptionNet(xception_config=xception_config)}
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_split_root', type=str, default='../data_split')
     parser.add_argument('--model', type=str, choices=model_zoo.keys())
     parser.add_argument('-bs', '--batch_size', type=int, default=512)
     parser.add_argument('-lr', '--learning_rate', type=float, default=5e-4)
+    parser.add_argument('-wd','--weight_decay',type=float,default=0.01)
     parser.add_argument('-epochs', '--epochs', type=int, default=100)
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--ckpt_root', default='./ckpt')
     parser.add_argument('--log_root', default='./logs')
     parser.add_argument('--balanced', action='store_true',help='While using balanced mode, only real and FaceSwap data will be included.')
     args = parser.parse_args()
+
 
     """
     Initialize logger
@@ -62,7 +59,7 @@ if __name__ == '__main__':
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))
     mode = "real_and_FS" if args.balanced else "all_data"
-    logger_name = timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_' + mode + '.log'
+    logger_name = timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_wd'+ str(args.weight_decay) + '_' + mode + '.log'
     logging.basicConfig(filename=os.path.join(args.log_root, logger_name), level=logging.INFO, format=LOG_FORMAT)
 
     # os.environ['CUDA_VISIBLE_DEVICE'] = '1,3'
@@ -77,6 +74,7 @@ if __name__ == '__main__':
     epochs = args.epochs
     batch_size = args.batch_size
     lr = args.learning_rate
+    wd = args.weight_decay
     ckpt_root = args.ckpt_root
     log_root = args.log_root
 
@@ -89,11 +87,10 @@ if __name__ == '__main__':
     print(f'Loading model {backbone}...')
 
     model = model_zoo[backbone].to(device)
-    print(model)
 
     if isinstance(model, ResNet):
         transform = resnet_default_data_transform
-    elif isinstance(model, XceptionNet) or 'Xception' in args.model:
+    elif isinstance(model, XceptionNet):
         transform = xception_default_data_transform
     elif isinstance(model, EfficientNet):
         transform = transforms.ToTensor()
@@ -106,10 +103,6 @@ if __name__ == '__main__':
     print(f'The total number of parameters: {param_num}.')
     logging.info(f'The trainable number of parameters: {trainable_param_num}.')
     print(f'The trainable number of parameters: {trainable_param_num}.')
-
-    if args.model == 'XceptionNet':
-        print(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
-        logging.info(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
 
     """
     Load data
@@ -171,7 +164,7 @@ if __name__ == '__main__':
     print('Getting loss and optimizer...')
     criterion = nn.CrossEntropyLoss()
     logging.info(f'Using loss function: Cross-Entropy loss.')
-    optimizer = optim.SGD(model.parameters(), lr=lr)
+    optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=wd)
     logging.info(f'Using optimizer: SGD, learning rate {lr}.')
 
     """
@@ -179,8 +172,9 @@ if __name__ == '__main__':
     """
     wandb.init(
         project='ST5188_fair_deepfake',
-        name=backbone + mode + 'lr'+str(lr),
+        name=backbone + '_' + mode + '_lr'+str(lr) + '_wd' + str(wd),
         config={'learning_rate': lr,
+                'weight_decay': wd,
                 'epochs': epochs,
                 'model': backbone}
     )
@@ -229,11 +223,11 @@ if __name__ == '__main__':
              'pred_label': pred_labels_list,
              'intersec': intersec_labels_list
         }
-        # pd.DataFrame(d).to_csv(f'{backbone}_training_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
+        pd.DataFrame(d).to_csv(f'{backbone}_training_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
         # evaluate fairness across gender
         gender_labels_list = [x.split('-')[0] for x in intersec_labels_list]
-        training_acc, training_auc, training_FPR, training_fair_gender_FFPR, training_fair_gender_FOAE, training_fair_gender_FMEO, training_gender_metrics = fairness_metrics(
+        training_acc, training_auc, training_FPR, training_fair_gender_FFPR, training_fair_gender_FOAE, training_fair_gender_FMEO, training_gender_matrix = fairness_metrics(
             np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), gender_labels_list)
         logging.info(
             f'[Training Accuracy, AUC and FPR] Epoch {epoch + 1}/{epochs}: accuracy {training_acc:.5f}, AUC {training_auc:.5f}, FPR {training_FPR:.5f}.')
@@ -287,7 +281,7 @@ if __name__ == '__main__':
                  'pred_label': pred_labels_list,
                  'intersec': intersec_labels_list
                  }
-            # pd.DataFrame(d).to_csv(f'{backbone}_validation_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
+            pd.DataFrame(d).to_csv(f'{backbone}_validation_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
             # evaluate fairness across gender
             gender_labels_list = [x.split('-')[0] for x in intersec_labels_list]
@@ -314,7 +308,7 @@ if __name__ == '__main__':
             if val_acc > best_acc:
                 best_acc = val_acc
                 torch.save(model.state_dict(),
-                           os.path.join(ckpt_root, timestamp + '_' + backbone + '_lr' + str(lr) + 'best_ckpt_from_epoch' + str(epoch + 1) + '.pth'))
+                           os.path.join(ckpt_root, timestamp + backbone + '_lr' + str(lr) + '_wd' + str(wd)+ '_best_ckpt_from_epoch' + str(epoch + 1) + '.pth'))
             # evaluation on testing set
             running_loss = 0
             labels_list = []
@@ -345,11 +339,11 @@ if __name__ == '__main__':
                  'pred_label': pred_labels_list,
                  'intersec': intersec_labels_list
                  }
-            # pd.DataFrame(d).to_csv(f'{backbone}_testing_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
+            pd.DataFrame(d).to_csv(f'{backbone}_testing_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
             # evaluate fairness across gender
             gender_labels_list = [x.split('-')[0] for x in intersec_labels_list]
-            testing_acc, testing_auc, testing_FPR, testing_fair_gender_FFPR, testing_fair_gender_FOAE, testing_fair_gender_FMEO, testing_gender_metrics = fairness_metrics(
+            testing_acc, testing_auc, testing_FPR, testing_fair_gender_FFPR, testing_fair_gender_FOAE, testing_fair_gender_FMEO, _ = fairness_metrics(
                 np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), gender_labels_list)
             logging.info(
                 f'[Testing Accuracy, AUC and FPR] Epoch {epoch + 1}/{epochs}: accuracy {testing_acc:.5f}, AUC {testing_auc:.5f}, FPR {testing_FPR:.5f}.')
@@ -358,7 +352,7 @@ if __name__ == '__main__':
 
             # evaluate fairness across race
             race_labels_list = [x.split('-')[1] for x in intersec_labels_list]
-            _, _, _, testing_fair_race_FFPR, testing_fair_race_FOAE, testing_fair_race_FMEO, testing_race_metrics = fairness_metrics(
+            _, _, _, testing_fair_race_FFPR, testing_fair_race_FOAE, testing_fair_race_FMEO, testing_gender_metrics = fairness_metrics(
                 np.array(labels_list), np.array(pred_labels_list), np.array(pred_probs_list), race_labels_list)
             logging.info(
                 f'[Testing fairness metrics across RACE] Epoch {epoch + 1}/{epochs}: FFPR {testing_fair_race_FFPR:.5f}, FOAE: {testing_fair_race_FOAE:.5f}, FMEO: {testing_fair_race_FMEO:.5f}.')
@@ -384,5 +378,5 @@ if __name__ == '__main__':
             })
             if epoch % 20 == 19:
                 torch.save(model.state_dict(),
-                           os.path.join(ckpt_root, timestamp + '_' + backbone + '_lr' + str(lr) + '_' + str(epoch + 1) + '.pth'))
+                           os.path.join(ckpt_root, timestamp + '_' + backbone + '_lr' + str(lr) + '_wd' + str(wd) + str(epoch + 1) + '.pth'))
     wandb.finish()

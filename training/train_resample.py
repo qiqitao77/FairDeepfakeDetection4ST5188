@@ -16,6 +16,8 @@ from dataset.dataset_w_demo_anno import DeepfakeDataset
 from transform import resnet_default_data_transform, xception_default_data_transform
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from torch.utils.data import Sampler
+from torch.utils.data import BatchSampler
 from backbones.ResNet import ResNet
 from backbones.XceptionNet import XceptionNet
 from backbones.EfficientNet import EfficientNet
@@ -42,9 +44,9 @@ if __name__ == '__main__':
                  'XceptionNet-hongguliu-ImageNet-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ImageNet')
                  # 'XceptionNet-hongguliu-ffpp-pretrained': models_hongguliu.model_selection(modelname='xception', num_out_classes=2, dropout=0.5, pretrained='ffpp')
                  }
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_split_root', type=str, default='../data_split')
+    parser.add_argument('--training_set', type=str, default='updated_idx_train.json', help='the json file of training set')
     parser.add_argument('--model', type=str, choices=model_zoo.keys())
     parser.add_argument('-bs', '--batch_size', type=int, default=512)
     parser.add_argument('-lr', '--learning_rate', type=float, default=5e-4)
@@ -52,8 +54,10 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--ckpt_root', default='./ckpt')
     parser.add_argument('--log_root', default='./logs')
+    parser.add_argument('--balanced_batch',action='store_true', help='If true, make the demographic distribtuion in each batch balanced. If true, should use "ordered" json file.')
     parser.add_argument('--balanced', action='store_true',help='While using balanced mode, only real and FaceSwap data will be included.')
     args = parser.parse_args()
+
 
     """
     Initialize logger
@@ -62,10 +66,9 @@ if __name__ == '__main__':
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))
     mode = "real_and_FS" if args.balanced else "all_data"
-    logger_name = timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_' + mode + '.log'
+    logger_name = '[resample]' + timestamp + '_' + args.model + 'lr' + str(args.learning_rate) + '_' + mode + '.log'
     logging.basicConfig(filename=os.path.join(args.log_root, logger_name), level=logging.INFO, format=LOG_FORMAT)
 
-    # os.environ['CUDA_VISIBLE_DEVICE'] = '1,3'
     if args.gpu is not None and torch.cuda.is_available():
         # device = torch.cuda.current_device()
         device = torch.device("cuda:"+str(args.gpu))
@@ -89,11 +92,10 @@ if __name__ == '__main__':
     print(f'Loading model {backbone}...')
 
     model = model_zoo[backbone].to(device)
-    print(model)
 
     if isinstance(model, ResNet):
         transform = resnet_default_data_transform
-    elif isinstance(model, XceptionNet) or 'Xception' in args.model:
+    elif isinstance(model, XceptionNet) or 'XceptionNet' in args.model:
         transform = xception_default_data_transform
     elif isinstance(model, EfficientNet):
         transform = transforms.ToTensor()
@@ -106,10 +108,6 @@ if __name__ == '__main__':
     print(f'The total number of parameters: {param_num}.')
     logging.info(f'The trainable number of parameters: {trainable_param_num}.')
     print(f'The trainable number of parameters: {trainable_param_num}.')
-
-    if args.model == 'XceptionNet':
-        print(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
-        logging.info(f'XceptionNet configuration: adjust channel :{xception_config["adjust_mode"]}; dropout: {xception_config["dropout"]}.')
 
     """
     Load data
@@ -137,7 +135,8 @@ if __name__ == '__main__':
         val_data = "real_and_FS_val.json"
         test_data = "real_and_FS_test.json"
     else:
-        train_data = "updated_idx_train.json"
+        # train_data = "updated_idx_train.json"
+        train_data = args.training_set
         val_data = "updated_idx_val.json"
         test_data = "updated_idx_test.json"
 
@@ -160,10 +159,40 @@ if __name__ == '__main__':
     testset = DeepfakeDataset(test_dict, transform)
     logging.info(
         f'Loading testing set from {os.path.join(data_split_root, test_data)}, containing {len(testset)} samples.')
+    logging.info(f'Using balanced batch mode: {args.balanced_batch}.')
 
-    train_loader = DataLoader(dataset=trainset, shuffle=True, num_workers=8, batch_size=batch_size)
+    """
+    Group Sampler
+    """
+    class GroupSampler(Sampler):
+        def __init__(self, data_source, group_size=8):
+            self.data_source = data_source
+            self.group_size = group_size
+            self.num_samples = (len(data_source) + group_size - 1)// group_size
+            self.grouped_indices = [list(range(i, min(i + group_size, len(data_source)))) for i in range(0, len(data_source), group_size)]
+
+        def __iter__(self):
+            indices = []
+            for gidx in torch.randperm(len(self.grouped_indices)).tolist():
+                    indices.extend(self.grouped_indices[gidx])
+            return iter(indices)
+
+        def __len__(self):
+            return self.num_samples
+    if args.balanced_batch:
+        sampler = GroupSampler(trainset)
+        train_loader = DataLoader(dataset=trainset, sampler=sampler, num_workers=8, batch_size=batch_size)
+    else:
+        train_loader = DataLoader(dataset=trainset, shuffle=True, num_workers=8, batch_size=batch_size)
     val_loader = DataLoader(dataset=valset, shuffle=False, num_workers=8, batch_size=batch_size)
     test_loader = DataLoader(dataset=testset, shuffle=False, num_workers=8, batch_size=batch_size)
+    # from collections import Counter
+    # for _,data in enumerate(train_loader):
+    #     print(f'------Batch {_+1}-----')
+    #     print(data['intersec_label'])
+    #     print(Counter(data['intersec_label']))
+    #     if _ > 49:
+    #         print('Stop.')
 
     """
     Define loss and optimizer
@@ -179,9 +208,10 @@ if __name__ == '__main__':
     """
     wandb.init(
         project='ST5188_fair_deepfake',
-        name=backbone + mode + 'lr'+str(lr),
+        name='[resample]' + timestamp + backbone + mode + 'lr'+str(lr),
         config={'learning_rate': lr,
                 'epochs': epochs,
+                'batch_size':batch_size,
                 'model': backbone}
     )
 
@@ -225,10 +255,10 @@ if __name__ == '__main__':
         epoch_train_loss = running_loss / len(trainset)
         print(f'[Training Loss] Epoch {epoch + 1}/{epochs}: {epoch_train_loss:.2f}.')
         logging.info(f'[Training Loss] Epoch {epoch + 1}/{epochs}: {epoch_train_loss:.5f}.')
-        d = {'gt_label': labels_list,
-             'pred_label': pred_labels_list,
-             'intersec': intersec_labels_list
-        }
+        # d = {'gt_label': labels_list,
+        #      'pred_label': pred_labels_list,
+        #      'intersec': intersec_labels_list
+        # }
         # pd.DataFrame(d).to_csv(f'{backbone}_training_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
         # evaluate fairness across gender
@@ -283,10 +313,10 @@ if __name__ == '__main__':
             epoch_val_loss = running_loss / len(valset)
             print(f'[Validation Loss] Epoch {epoch + 1}/{epochs}: {epoch_val_loss:.2f}.')
             logging.info(f'[Validation Loss] Epoch {epoch + 1}/{epochs}: {epoch_val_loss:.5f}.')
-            d = {'gt_label': labels_list,
-                 'pred_label': pred_labels_list,
-                 'intersec': intersec_labels_list
-                 }
+            # d = {'gt_label': labels_list,
+            #      'pred_label': pred_labels_list,
+            #      'intersec': intersec_labels_list
+            #      }
             # pd.DataFrame(d).to_csv(f'{backbone}_validation_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
             # evaluate fairness across gender
@@ -341,10 +371,10 @@ if __name__ == '__main__':
             epoch_test_loss = running_loss / len(testset)
             print(f'[Testing Loss] Epoch {epoch + 1}/{epochs}: {epoch_test_loss:.2f}.')
             logging.info(f'[Testing Loss] Epoch {epoch + 1}/{epochs}: {epoch_test_loss:.5f}.')
-            d = {'gt_label': labels_list,
-                 'pred_label': pred_labels_list,
-                 'intersec': intersec_labels_list
-                 }
+            # d = {'gt_label': labels_list,
+            #      'pred_label': pred_labels_list,
+            #      'intersec': intersec_labels_list
+            #      }
             # pd.DataFrame(d).to_csv(f'{backbone}_testing_set_preds_epoch_{epoch + 1}_lr{lr}.csv', index=False)
 
             # evaluate fairness across gender
