@@ -98,10 +98,13 @@ python evaluate.py --h
 Here is an example of evaluating a trained ResNet-18 model.
 
 ```
-
+python evaluate.py --model ResNet-18 \
+--ckpt ./ckpt/useful_ckpt/reweigh/gender-group/20240331_213432_ResNet-18_lr0.0005_100.pth \ # change the checkpoint to yours
+--output_path ./outputs/reweigh/gender-group \ # change your own output path
+-bs 256
 ```
 
-Once the evaluation done, you can find the results in ```./training/outputs``` folder, which will be created during evaluation.
+Once the evaluation is done, you can find the results in the output path in the argument.
 
 # References
 ```
