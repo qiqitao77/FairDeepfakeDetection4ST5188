@@ -7,7 +7,7 @@ In this project, it is aimed to explore and attempt to improve the fairness of d
 ![image](figures/unfairdetection.png)
 ![image](figures/fairdetection.png)
 
-# Crete Environment
+# Create Environment
 Run the codes below to build the virtual environment for this project and install all dependencies.
 
 ```
