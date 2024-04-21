@@ -8,9 +8,11 @@ In this project, it is aimed to explore and attempt to improve the fairness of d
 ![image](figures/fairdetection.png)
 
 # Crete Environment
+Run the codes below to build the virtual environment for this project and install all dependencies.
+
 ```
-git clone
-cd
+git clone https://github.com/nus-st5188/ay2324-s2-pg14.git
+cd ay2324-s2-pg14
 conda create -n fairdeepfake python=3.8
 conda activate fairdeepfake
 pip install -r requirements.txt
@@ -92,6 +94,13 @@ First, run the code below to figure out the arguments before running the trainin
 ```
 python evaluate.py --h
 ```
+
+Here is an example of evaluating a trained ResNet-18 model.
+
+```
+
+```
+
 Once the evaluation done, you can find the results in ```./training/outputs``` folder, which will be created during evaluation.
 
 # References
